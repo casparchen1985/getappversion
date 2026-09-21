@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -18,12 +19,7 @@ if sys.platform == "win32":
         pass
 
 DEFAULT_PATHS = [
-    "/system/app",
     "/system/priv-app",
-    "/system/product/app",
-    "/system/product/priv-app",
-    "/vendor/app",
-    "/data/app",
 ]
 
 MAX_WORKERS = 5
@@ -76,6 +72,12 @@ def get_device_identity(serial):
     model = adb_shell(serial, ["getprop", "ro.product.model"]).stdout.strip() or "UnknownModel"
     real_serial = adb_shell(serial, ["getprop", "ro.serialno"]).stdout.strip() or serial
     return sanitize(model), sanitize(real_serial)
+
+
+def get_device_os_info(serial):
+    os_version = adb_shell(serial, ["getprop", "ro.build.version.release"]).stdout.strip() or "N/A"
+    api_level = adb_shell(serial, ["getprop", "ro.build.version.sdk"]).stdout.strip() or "N/A"
+    return os_version, api_level
 
 
 def find_apks(serial, paths):
@@ -143,27 +145,58 @@ def extract_via_aapt2(serial, apk_path, aapt2_path, tmp_dir):
     return display_name, package_name, version_name, version_code
 
 
-def extract_via_adb_fallback(apk_path, pm_map, serial):
+def build_dir_map(pm_map):
+    dir_map = {}
+    for apk_path, package_name in pm_map.items():
+        parent = str(Path(apk_path.replace("\\", "/")).parent)
+        dir_map.setdefault(parent, package_name)
+    return dir_map
+
+
+def extract_via_adb_fallback(apk_path, pm_map, dir_map, serial):
     package_name = pm_map.get(apk_path)
-    if not package_name:
-        return apk_path, "N/A", "N/A", "N/A"
-    version_name, version_code = parse_dumpsys_version(serial, package_name)
-    return (
-        package_name,
-        package_name,
-        version_name or "N/A",
-        version_code or "N/A",
-    )
+    if package_name:
+        version_name, version_code = parse_dumpsys_version(serial, package_name)
+        return (
+            package_name,
+            package_name,
+            version_name or "N/A",
+            version_code or "N/A",
+        )
+
+    parent = str(Path(apk_path.replace("\\", "/")).parent)
+    package_name = dir_map.get(parent)
+    if package_name:
+        version_name, version_code = parse_dumpsys_version(serial, package_name)
+        display_name = f"{package_name} [split: {Path(apk_path).name}]"
+        return (
+            display_name,
+            package_name,
+            version_name or "N/A",
+            version_code or "N/A",
+        )
+
+    return f"[unknown split] {Path(apk_path).name}", "N/A", "N/A", "N/A"
 
 
 def process_device(serial, paths, output_dir, tool_path, mode):
     model, real_serial = get_device_identity(serial)
-    out_file = output_dir / f"{model}_{real_serial}.txt"
+    os_version, api_level = get_device_os_info(serial)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_file = output_dir / f"{model}_{real_serial}_{timestamp}.txt"
 
     apk_paths = find_apks(serial, paths)
     pm_map = {} if mode == "aapt2" else build_pm_map(serial)
+    dir_map = {} if mode == "aapt2" else build_dir_map(pm_map)
 
-    lines = [f"Model: {model}", f"Serial: {real_serial}", f"APK Count: {len(apk_paths)}", ""]
+    lines = [
+        f"Model: {model}",
+        f"Serial: {real_serial}",
+        f"OS Version: {os_version}",
+        f"API Level: {api_level}",
+        f"APK Count: {len(apk_paths)}",
+        "",
+    ]
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         for apk_path in apk_paths:
@@ -171,12 +204,13 @@ def process_device(serial, paths, output_dir, tool_path, mode):
             if mode == "aapt2":
                 info = extract_via_aapt2(serial, apk_path, tool_path, tmp_dir)
             if info is None:
-                info = extract_via_adb_fallback(apk_path, pm_map, serial)
+                info = extract_via_adb_fallback(apk_path, pm_map, dir_map, serial)
             display_name, package_name, version_name, version_code = info
             lines.append(f"Display Name: {display_name}")
             lines.append(f"Package Name: {package_name}")
-            lines.append(f"Version: {version_name} ({version_code})")
-            lines.append(f"Path: {apk_path}")
+            lines.append(f"Version Name: {version_name}")
+            lines.append(f"Version Code: {version_code}")
+            lines.append(f"File Path: {apk_path}")
             lines.append("")
 
     output_dir.mkdir(parents=True, exist_ok=True)
