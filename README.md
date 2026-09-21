@@ -1,13 +1,14 @@
 # GetAppVersion
 
-掃描已連接的 Android 裝置，取得指定資料夾路徑下所有 APK 的 Display Name、Package Name、Version Name、Version Code，並為每台裝置輸出一份獨立的 txt 檔案。支援 Windows 10 / macOS / Ubuntu，會自動辨識平台並執行對應邏輯。
+掃描已連接的 Android 裝置，取得 App 的 Display Name、Version Name、Version Code、Package Name，並為每台裝置輸出一份獨立的 csv 檔案。支援 Windows 10 / macOS / Ubuntu，會自動辨識平台並執行對應邏輯。
 
 ## 運作流程
 
 1. 透過 `adb devices` 偵測所有已連接的 Android 裝置（可多台，同時平行處理）。
-2. 對每一台裝置，在指定的資料夾路徑下（預設 `/system/priv-app`）尋找所有 `.apk` 檔案。
-3. 解析每個 apk 的 Display Name、Package Name、Version Name、Version Code（解析方式依本機是否有 `aapt2` 而不同，詳見下方「Display Name 如何解析」）。
-4. 每台裝置各自輸出一份 txt 檔案，檔名包含型號、序號與時間戳記。
+2. 依是否有帶 `--paths` 參數決定查詢方式：
+   - 未帶 `--paths`（預設）：直接依內建的 App 清單（顯示名稱＋package name）逐一查詢已安裝版本。
+   - 有帶 `--paths`：在指定的資料夾路徑下尋找所有 `.apk` 檔案，解析方式依本機是否有 `aapt2` 而不同，詳見下方「Display Name 如何解析」。
+3. 每台裝置各自輸出一份 csv 檔案，檔名包含型號、序號與時間戳記。
 
 ## 前置需求
 
@@ -26,11 +27,10 @@ run.bat
 
 **macOS / Ubuntu**
 ```
-chmod +x run.sh
 ./run.sh
 ```
 
-執行完成後，輸出的 txt 檔案預設會出現在目前目錄下的 `output/` 資料夾中，內容格式請參考下方「輸出結果」。
+執行完成後，輸出的 csv 檔案預設會出現在目前目錄下的 `output/` 資料夾中，內容格式請參考下方「輸出結果」。
 
 ## 進階用法（自訂參數）
 
@@ -38,21 +38,24 @@ chmod +x run.sh
 
 | 參數 | 說明 | 預設值 |
 | --- | --- | --- |
-| `--paths` | 逗號分隔的裝置端資料夾路徑清單，掃描這些路徑下的所有 `.apk` 檔案 | `/system/priv-app` |
-| `--output` | 輸出 txt 檔案的資料夾 | `output/`（目前工作目錄下） |
-| `--aapt2` | 手動指定 aapt2（或 aapt）執行檔路徑 | 自動在 PATH 中偵測 |
+| `--paths` | 逗號分隔的裝置端資料夾路徑清單。**有帶此參數時**，改為掃描這些路徑下的所有 `.apk` 檔案（而非用內建 App 清單查詢） | 未帶時使用內建 App 清單查詢 |
+| `--output` | 輸出 csv 檔案的資料夾 | `output/`（目前工作目錄下） |
+| `--aapt2` | 手動指定 aapt2（或 aapt）執行檔路徑（僅在有帶 `--paths` 時生效） | 自動在 PATH 中偵測 |
 
 範例：
 
 ```
-# 指定多個掃描路徑
+# 預設：用內建 App 清單查詢已安裝版本
+run.bat
+
+# 改用資料夾掃描模式，指定多個掃描路徑
 run.bat --paths /system/priv-app,/data/app
 
 # 指定輸出資料夾
 run.bat --output C:\reports\2026-09-21
 
-# 手動指定 aapt2 路徑（本機有裝但未加入 PATH 時）
-run.bat --aapt2 "C:\Android\build-tools\34.0.0\aapt2.exe"
+# 資料夾掃描模式下手動指定 aapt2 路徑（本機有裝但未加入 PATH 時）
+run.bat --paths /system/priv-app --aapt2 "C:\Android\build-tools\34.0.0\aapt2.exe"
 
 # 組合多個參數
 run.bat --paths /system/priv-app,/vendor/app --output C:\reports --aapt2 "C:\Android\build-tools\34.0.0\aapt2.exe"
@@ -64,7 +67,11 @@ macOS / Ubuntu 語法相同，把 `run.bat` 換成 `./run.sh` 即可，例如：
 ./run.sh --paths /system/priv-app,/data/app --output ~/reports/2026-09-21
 ```
 
-## Display Name 如何解析
+## App 清單如何取得版本（預設模式）
+
+未帶 `--paths` 時，腳本改用內建的 `DEFAULT_APPS` 清單（顯示名稱＋package name，直接寫在 `get_app_version.py` 裡），對每個 package name 執行 `adb shell dumpsys package <package>` 取得 Version Name/Code，並用 `adb shell pm path <package>` 取得已安裝的 apk 路徑。裝置上若未安裝該 package，Version Name/Code 與 File Path 會顯示 `N/A`（Display Name 仍照清單顯示，不受影響）。
+
+## Display Name 如何解析（`--paths` 資料夾掃描模式）
 
 腳本啟動時會自動偵測本機是否有 `aapt2`（或 `aapt`）可用，並在終端機明確印出目前使用哪一種模式：
 
@@ -75,13 +82,13 @@ macOS / Ubuntu 語法相同，把 `run.bat` 換成 `./run.sh` 即可，例如：
 
 ## 多裝置支援
 
-透過 `adb devices` 自動偵測所有已連接裝置，最多同時以 5 個執行緒平行處理，每台裝置各自獨立輸出一份 txt，單一裝置失敗不會影響其他裝置。所有裝置處理完畢後，終端機會印出成功／失敗摘要。
+透過 `adb devices` 自動偵測所有已連接裝置，最多同時以 5 個執行緒平行處理，每台裝置各自獨立輸出一份 csv，單一裝置失敗不會影響其他裝置。所有裝置處理完畢後，終端機會印出成功／失敗摘要。
 
 ## 輸出結果
 
-**檔名規則**：`{型號}_{序號}_{YYYYMMdd}-{HHmmss}.txt`（型號、序號中的空白與特殊字元會自動轉換為底線，時間戳記為該檔案產出當下的本機時間）。
+**檔名規則**：`{型號}_{序號}_{YYYYMMdd}-{HHmmss}.csv`（型號、序號中的空白與特殊字元會自動轉換為底線，時間戳記為該檔案產出當下的本機時間）。
 
-**檔案內容**：開頭為裝置資訊，接著每個 apk 各佔一個區塊。範例：
+**檔案內容**：開頭為裝置資訊（純文字，非 CSV 欄位），接著空一行後是 App 清單的 CSV 表格（含表頭列）。範例：
 
 ```
 Model: XXXXXX
@@ -90,21 +97,16 @@ OS Version: 13
 API Level: 33
 APK Count: 2
 
-Display Name: LINE
-Package Name: jp.naver.line.android
-Version Name: 12.3.1
-Version Code: 1203100
-File Path: /system/priv-app/LineApp/LineApp.apk
-
-Display Name: com.google.android.networkstack [split: NetworkStackGoogle-arm64_v8a.apk]
-Package Name: com.google.android.networkstack
-Version Name: 16
-Version Code: 361420000
-File Path: /system/priv-app/NetworkStackGoogle/NetworkStackGoogle-arm64_v8a.apk
+Display Name,Version Name,Version Code,Package Name,File Path
+LINE,12.3.1,1203100,jp.naver.line.android,/system/priv-app/LineApp/LineApp.apk
+com.google.android.networkstack [split: NetworkStackGoogle-arm64_v8a.apk],16,361420000,com.google.android.networkstack,/system/priv-app/NetworkStackGoogle/NetworkStackGoogle-arm64_v8a.apk
 ```
+
+CSV 表格部分以標準 CSV 格式輸出（欄位內含逗號/雙引號時會自動加上雙引號跳脫），可直接用 Excel 或其他 CSV 工具開啟；檔案以 UTF-8 with BOM 編碼儲存，避免 Excel 開啟中文/特殊字元時亂碼。
 
 ## 已知限制
 
-- 純 adb fallback 模式下，多數 App 的 Display Name 欄位會以 Package Name 代替（Android label 多為資源 ID，純 adb 指令無法解析成文字）。
+- 內建 App 清單模式（預設）下，若裝置上未安裝清單中的某個 package，Version Name / Version Code / File Path 會顯示 `N/A`；清單本身為程式內寫死的內容，需要修改 `get_app_version.py` 的 `DEFAULT_APPS` 才能增減。
+- 純 adb fallback 模式（`--paths` 掃描模式下未偵測到 aapt2）下，多數 App 的 Display Name 欄位會以 Package Name 代替（Android label 多為資源 ID，純 adb 指令無法解析成文字）。
 - 純 adb fallback 模式下，apk 檔案存在但完全找不到對應已安裝套件時（非 split APK 的情況），Version Name / Version Code 會顯示 `N/A`。
 - Python 自動安裝步驟依賴各平台套件管理器（winget / Homebrew / apt），若環境缺少這些工具或沒有安裝權限，需使用者手動安裝 Python 3。

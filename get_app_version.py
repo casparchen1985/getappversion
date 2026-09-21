@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-"""Scan Android devices for APKs under given paths and export version info per device."""
+"""Query per-device app version info from connected Android devices.
+
+Default mode queries a built-in list of app package names directly.
+When --paths is given, scans .apk files under those device-side folders instead.
+"""
 
 import argparse
 import concurrent.futures
+import csv
+import io
 import re
 import shutil
 import subprocess
@@ -20,6 +26,52 @@ if sys.platform == "win32":
 
 DEFAULT_PATHS = [
     "/system/priv-app",
+]
+
+# Built-in (Display Name, Package Name) list used when --paths is not given.
+DEFAULT_APPS = [
+    ("A Demo", "sw.programme.demos"),
+    ("ADCClient", "sw.application.adcclient"),
+    ("AppLock", "sw.programme.applock"),
+    ("App Management", "com.cipherlab.appmanagerservice.common"),
+    ("BarcodeToSetting", "com.cipherlab.barcodetosetting"),
+    ("BTPrtMate", "com.cipherlab.btprtmate"),
+    ("Button Assignment", "sw.programme.buttonassignment"),
+    ("CustomizeSetupWizard", "com.cipherlab.customizesetupwizard"),
+    ("Cipherlab Assistant Service", "sw.programme.assistantservice"),
+    ("Cipherlab Remote Control", "sw.programme.cipherlabremotecontrol"),
+    ("CipherLab Network Assistant", "com.cipherlab.cipherLabnetworkassistant"),
+    ("DeviceHealthDashboard", "sw.programme.devicehealth.dashboard"),
+    ("EnDeCloud", "sw.programme.endecloud"),
+    ("Enterprise Setting", "com.sw.enterprisekeypadmode"),
+    ("Enterprise Services", "com.sw.enterprisesettingsservice"),
+    ("EZCheck", "com.cipherlab.self_testing"),
+    ("EZConfig", "sw.programme.ezconfig"),
+    ("EZEdit", "sw.programme.ezedit"),
+    ("HF RFID Configuration", "sw.programme.hf"),
+    ("ImageToText", "com.cipherlab.imagetotext"),
+    ("Image2Text Launcher", "com.cipherlab.image2textlauncher"),
+    ("IntelliWorker", "sw.programme.intelliworker"),
+    ("KeyMappingManager", "com.cipherlab.keymappingmanager"),
+    ("LogGen", "com.cipherlab.loggen"),
+    ("LaunchPad", "com.cipherlab.LaunchPad"),
+    ("Ping", "sw.programme.cipherlabping"),
+    ("Reader Service", "com.cipherlab.clbarcodeservice"),
+    ("ReaderConfig", "sw.programme.readerconfig"),
+    ("RFIDService", "com.cipherlab.rfidservice"),
+    ("SAM Service", "com.cipherlab.clsamservice"),
+    ("SDC Activation Tool", "com.sw.activationkeyhelper"),
+    ("Signature Capture", "sw.programme.signature"),
+    ("SIP Controller", "com.sw.android.sipcontroller"),
+    ("SIP Controller Service", "com.sw.android.sipcontroller_service"),
+    ("SmaPri", "com.cipherlab.smapri"),
+    ("Software Trigger", "com.Cipherlab.SoftwareTrigger"),
+    ("Software Trigger Service", "com.Cipherlab.SoftwareTrigger_Service"),
+    ("Terminal Emulation Android for CipherLab", "sw.programme.te"),
+    ("Velocity", "com.wavelink.velocity"),
+    ("WMDS Agent", "sw.programme.wmdsagent"),
+    ("WMDSInstaller", "sw.programme.wmdsinstaller"),
+    ("Wireless INIT", "sw.programme.wirelessinit"),
 ]
 
 MAX_WORKERS = 5
@@ -121,6 +173,15 @@ def parse_dumpsys_version(serial, package_name):
     return version_name, version_code
 
 
+def get_apk_path(serial, package_name):
+    result = adb_shell(serial, ["pm", "path", package_name])
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("package:"):
+            return line[len("package:"):].strip()
+    return "N/A"
+
+
 def extract_via_aapt2(serial, apk_path, aapt2_path, tmp_dir):
     local_apk = Path(tmp_dir) / Path(apk_path).name
     pull = run(["adb", "-s", serial, "pull", apk_path, str(local_apk)], timeout=60)
@@ -179,25 +240,54 @@ def extract_via_adb_fallback(apk_path, pm_map, dir_map, serial):
     return f"[unknown split] {Path(apk_path).name}", "N/A", "N/A", "N/A"
 
 
-def process_device(serial, paths, output_dir, tool_path, mode):
+def render_csv_table(rows):
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(["Display Name", "Version Name", "Version Code", "Package Name", "File Path"])
+    writer.writerows(rows)
+    return buf.getvalue()
+
+
+def render_device_output(model, real_serial, os_version, api_level, entry_count, rows):
+    header = [
+        f"Model: {model}",
+        f"Serial: {real_serial}",
+        f"OS Version: {os_version}",
+        f"API Level: {api_level}",
+        f"APK Count: {entry_count}",
+    ]
+    return "\n".join(header) + "\n\n" + render_csv_table(rows)
+
+
+def process_device_by_app_list(serial, output_dir):
     model, real_serial = get_device_identity(serial)
     os_version, api_level = get_device_os_info(serial)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_file = output_dir / f"{model}_{real_serial}_{timestamp}.txt"
+    out_file = output_dir / f"{model}_{real_serial}_{timestamp}.csv"
+
+    rows = []
+    for display_name, package_name in DEFAULT_APPS:
+        version_name, version_code = parse_dumpsys_version(serial, package_name)
+        apk_path = get_apk_path(serial, package_name)
+        rows.append((display_name, version_name or "N/A", version_code or "N/A", package_name, apk_path))
+
+    content = render_device_output(model, real_serial, os_version, api_level, len(DEFAULT_APPS), rows)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(content, encoding="utf-8-sig")
+    return serial, out_file, len(DEFAULT_APPS)
+
+
+def process_device_by_paths(serial, paths, output_dir, tool_path, mode):
+    model, real_serial = get_device_identity(serial)
+    os_version, api_level = get_device_os_info(serial)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_file = output_dir / f"{model}_{real_serial}_{timestamp}.csv"
 
     apk_paths = find_apks(serial, paths)
     pm_map = {} if mode == "aapt2" else build_pm_map(serial)
     dir_map = {} if mode == "aapt2" else build_dir_map(pm_map)
 
-    lines = [
-        f"Model: {model}",
-        f"Serial: {real_serial}",
-        f"OS Version: {os_version}",
-        f"API Level: {api_level}",
-        f"APK Count: {len(apk_paths)}",
-        "",
-    ]
-
+    rows = []
     with tempfile.TemporaryDirectory() as tmp_dir:
         for apk_path in apk_paths:
             info = None
@@ -206,50 +296,19 @@ def process_device(serial, paths, output_dir, tool_path, mode):
             if info is None:
                 info = extract_via_adb_fallback(apk_path, pm_map, dir_map, serial)
             display_name, package_name, version_name, version_code = info
-            lines.append(f"Display Name: {display_name}")
-            lines.append(f"Package Name: {package_name}")
-            lines.append(f"Version Name: {version_name}")
-            lines.append(f"Version Code: {version_code}")
-            lines.append(f"File Path: {apk_path}")
-            lines.append("")
+            rows.append((display_name, version_name, version_code, package_name, apk_path))
 
+    content = render_device_output(model, real_serial, os_version, api_level, len(apk_paths), rows)
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_file.write_text("\n".join(lines), encoding="utf-8")
+    out_file.write_text(content, encoding="utf-8-sig")
     return serial, out_file, len(apk_paths)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Export APK version info per connected Android device.")
-    parser.add_argument("--paths", default=",".join(DEFAULT_PATHS), help="Comma-separated device-side folder paths to scan.")
-    parser.add_argument("--output", default="output", help="Output directory for the per-device txt files.")
-    parser.add_argument("--aapt2", default=None, help="Explicit path to aapt2/aapt executable.")
-    args = parser.parse_args()
-
-    check_adb()
-    paths = [p.strip() for p in args.paths.split(",") if p.strip()]
-    output_dir = Path(args.output)
-
-    devices = list_devices()
-    if not devices:
-        print("未偵測到任何已連接的 Android 裝置。", file=sys.stderr)
-        sys.exit(1)
-
-    tool_path = find_tool(args.aapt2)
-    mode = "aapt2" if tool_path else "adb-fallback"
-    if mode == "aapt2":
-        print(f"偵測到 aapt2/aapt：{tool_path}，使用 aapt2 模式解析 Display Name。")
-    else:
-        print("未偵測到 aapt2/aapt，改用純 adb fallback 模式（多數 App 的 Display Name 將以 Package Name 顯示）。")
-
-    print(f"偵測到 {len(devices)} 台裝置：{', '.join(devices)}")
-
+def run_pool(devices, submit_fn):
     successes = []
     failures = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {
-            executor.submit(process_device, serial, paths, output_dir, tool_path, mode): serial
-            for serial in devices
-        }
+        futures = {executor.submit(submit_fn, serial): serial for serial in devices}
         for future in concurrent.futures.as_completed(futures):
             serial = futures[future]
             try:
@@ -257,10 +316,50 @@ def main():
                 successes.append((serial, out_file, count))
             except Exception as exc:
                 failures.append((serial, str(exc)))
+    return successes, failures
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Export per-app version info per connected Android device.")
+    parser.add_argument(
+        "--paths",
+        default=None,
+        help="Comma-separated device-side folder paths to scan for .apk files. "
+        "If omitted, queries the built-in app list by package name instead.",
+    )
+    parser.add_argument("--output", default="output", help="Output directory for the per-device txt files.")
+    parser.add_argument("--aapt2", default=None, help="Explicit path to aapt2/aapt executable (only used with --paths).")
+    args = parser.parse_args()
+
+    check_adb()
+    output_dir = Path(args.output)
+
+    devices = list_devices()
+    if not devices:
+        print("未偵測到任何已連接的 Android 裝置。", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"偵測到 {len(devices)} 台裝置：{', '.join(devices)}")
+
+    if args.paths:
+        paths = [p.strip() for p in args.paths.split(",") if p.strip()]
+        tool_path = find_tool(args.aapt2)
+        mode = "aapt2" if tool_path else "adb-fallback"
+        if mode == "aapt2":
+            print(f"偵測到 aapt2/aapt：{tool_path}，使用 aapt2 模式解析 Display Name。")
+        else:
+            print("未偵測到 aapt2/aapt，改用純 adb fallback 模式（多數 App 的 Display Name 將以 Package Name 顯示）。")
+        print(f"已指定 --paths，掃描路徑：{', '.join(paths)}")
+        successes, failures = run_pool(
+            devices, lambda serial: process_device_by_paths(serial, paths, output_dir, tool_path, mode)
+        )
+    else:
+        print(f"未指定 --paths，改用內建 App 清單查詢已安裝版本（共 {len(DEFAULT_APPS)} 筆）。")
+        successes, failures = run_pool(devices, lambda serial: process_device_by_app_list(serial, output_dir))
 
     print("\n===== 執行結果摘要 =====")
     for serial, out_file, count in successes:
-        print(f"[成功] {serial} -> {out_file} ({count} 個 apk)")
+        print(f"[成功] {serial} -> {out_file} ({count} 個項目)")
     for serial, error in failures:
         print(f"[失敗] {serial} -> {error}")
 
