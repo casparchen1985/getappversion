@@ -93,6 +93,7 @@ macOS / Ubuntu 語法相同，把 `run.bat` 換成 `./run.sh` 即可，例如：
 ```
 Model: XXXXXX
 Serial: XXXXXXXXXX
+Build Number: XXXXXXXXXXXXXX
 OS Version: 13
 API Level: 33
 APK Count: 2

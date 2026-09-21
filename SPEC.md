@@ -2,7 +2,7 @@
 
 ## 背景與需求
 
-在 Windows 10 / macOS / Ubuntu 三種平台上，自動辨識平台並執行對應邏輯，透過 adb 連接 Android 裝置，查詢 App 版本資訊，針對每一台裝置輸出一份獨立的 csv 檔案（檔名格式：`{型號}_{序號}_{YYYYMMdd}-{HHmmss}.csv`）。檔案開頭為裝置資訊（Model / Serial / OS Version / API Level / APK Count，純文字非 CSV 欄位），接著空一行後是 App 清單的 CSV 表格（表頭：Display Name、Version Name、Version Code、Package Name、File Path）。
+在 Windows 10 / macOS / Ubuntu 三種平台上，自動辨識平台並執行對應邏輯，透過 adb 連接 Android 裝置，查詢 App 版本資訊，針對每一台裝置輸出一份獨立的 csv 檔案（檔名格式：`{型號}_{序號}_{YYYYMMdd}-{HHmmss}.csv`）。檔案開頭為裝置資訊（Model / Serial / Build Number / OS Version / API Level / APK Count，純文字非 CSV 欄位），接著空一行後是 App 清單的 CSV 表格（表頭：Display Name、Version Name、Version Code、Package Name、File Path）。
 
 查詢方式依是否帶 `--paths` 參數分兩種模式：未帶時用內建 App 清單直接查詢已安裝套件版本；有帶時掃描指定資料夾路徑下的實體 `.apk` 檔案。
 

@@ -127,9 +127,10 @@ def get_device_identity(serial):
 
 
 def get_device_os_info(serial):
+    build_number = adb_shell(serial, ["getprop", "ro.build.display.id"]).stdout.strip() or "N/A"
     os_version = adb_shell(serial, ["getprop", "ro.build.version.release"]).stdout.strip() or "N/A"
     api_level = adb_shell(serial, ["getprop", "ro.build.version.sdk"]).stdout.strip() or "N/A"
-    return os_version, api_level
+    return build_number, os_version, api_level
 
 
 def find_apks(serial, paths):
@@ -248,10 +249,11 @@ def render_csv_table(rows):
     return buf.getvalue()
 
 
-def render_device_output(model, real_serial, os_version, api_level, entry_count, rows):
+def render_device_output(model, real_serial, build_number, os_version, api_level, entry_count, rows):
     header = [
         f"Model: {model}",
         f"Serial: {real_serial}",
+        f"Build Number: {build_number}",
         f"OS Version: {os_version}",
         f"API Level: {api_level}",
         f"APK Count: {entry_count}",
@@ -261,7 +263,7 @@ def render_device_output(model, real_serial, os_version, api_level, entry_count,
 
 def process_device_by_app_list(serial, output_dir):
     model, real_serial = get_device_identity(serial)
-    os_version, api_level = get_device_os_info(serial)
+    build_number, os_version, api_level = get_device_os_info(serial)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     out_file = output_dir / f"{model}_{real_serial}_{timestamp}.csv"
 
@@ -271,7 +273,7 @@ def process_device_by_app_list(serial, output_dir):
         apk_path = get_apk_path(serial, package_name)
         rows.append((display_name, version_name or "N/A", version_code or "N/A", package_name, apk_path))
 
-    content = render_device_output(model, real_serial, os_version, api_level, len(DEFAULT_APPS), rows)
+    content = render_device_output(model, real_serial, build_number, os_version, api_level, len(DEFAULT_APPS), rows)
     output_dir.mkdir(parents=True, exist_ok=True)
     out_file.write_text(content, encoding="utf-8-sig")
     return serial, out_file, len(DEFAULT_APPS)
@@ -279,7 +281,7 @@ def process_device_by_app_list(serial, output_dir):
 
 def process_device_by_paths(serial, paths, output_dir, tool_path, mode):
     model, real_serial = get_device_identity(serial)
-    os_version, api_level = get_device_os_info(serial)
+    build_number, os_version, api_level = get_device_os_info(serial)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     out_file = output_dir / f"{model}_{real_serial}_{timestamp}.csv"
 
@@ -298,7 +300,7 @@ def process_device_by_paths(serial, paths, output_dir, tool_path, mode):
             display_name, package_name, version_name, version_code = info
             rows.append((display_name, version_name, version_code, package_name, apk_path))
 
-    content = render_device_output(model, real_serial, os_version, api_level, len(apk_paths), rows)
+    content = render_device_output(model, real_serial, build_number, os_version, api_level, len(apk_paths), rows)
     output_dir.mkdir(parents=True, exist_ok=True)
     out_file.write_text(content, encoding="utf-8-sig")
     return serial, out_file, len(apk_paths)
