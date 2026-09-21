@@ -104,6 +104,15 @@ com.google.android.networkstack [split: NetworkStackGoogle-arm64_v8a.apk],16,361
 
 CSV 表格部分以標準 CSV 格式輸出（欄位內含逗號/雙引號時會自動加上雙引號跳脫），可直接用 Excel 或其他 CSV 工具開啟；檔案以 UTF-8 with BOM 編碼儲存，避免 Excel 開啟中文/特殊字元時亂碼。
 
+## 打包發布（維護者用）
+
+`release.sh`（macOS / Ubuntu / Git Bash）與 `release.bat`（Windows，cmd 或 PowerShell 皆可）會用 `git archive` 產出不含 `.git` 資訊的發布用 zip：
+
+```
+./release.sh                  # 或 release.bat，預設輸出 GetAppVersion.zip
+./release.sh ~/reports/v1.zip # 指定輸出路徑
+```
+
 ## 已知限制
 
 - 內建 App 清單模式（預設）下，若裝置上未安裝清單中的某個 package，Version Name / Version Code / File Path 會顯示 `N/A`；清單本身為程式內寫死的內容，需要修改 `get_app_version.py` 的 `DEFAULT_APPS` 才能增減。

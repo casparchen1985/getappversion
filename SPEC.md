@@ -28,6 +28,8 @@
 | `run.sh` | macOS / Ubuntu 共用啟動器（用 `uname` 分辨 Darwin vs Linux 以選擇對應套件管理器） |
 | `README.md` | 使用者導向的安裝與使用說明 |
 | `SPEC.md` | 本文件，記錄需求與設計決策 |
+| `release.sh` / `release.bat` | 維護者用的打包腳本，透過 `git archive` 產出不含 `.git` 的發布用 zip（cmd/PowerShell/Git Bash 皆可執行對應版本） |
+| `.gitattributes` | 標記 `.gitignore`、`.gitattributes`、`release.sh`、`release.bat` 這些開發用檔案為 `export-ignore`，`git archive` 打包時自動排除 |
 
 ## 已知限制
 
